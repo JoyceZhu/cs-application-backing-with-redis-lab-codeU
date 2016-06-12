@@ -5,10 +5,12 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 
+import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import redis.clients.jedis.Jedis;
@@ -59,7 +61,20 @@ public class JedisIndex {
 		String redisKey = termCounterKey(url);
 		return jedis.exists(redisKey);
 	}
-	
+
+	/**
+	* Adds a URL to the set associated with `term`.
+	*/
+    public void add(String term, TermCounter tc) 
+    {
+    	jedis.sadd(urlSetKey(term), tc.getLabel());
+    } 
+ 
+    /**
+     * Pushes the contents of the TermCounter to Redis.
+     */
+    // public List<Object> pushTermCounterToRedis(TermCounter tc) {}
+
 	/**
 	 * Looks up a search term and returns a set of URLs.
 	 * 
@@ -67,8 +82,7 @@ public class JedisIndex {
 	 * @return Set of URLs.
 	 */
 	public Set<String> getURLs(String term) {
-        // FILL THIS IN!
-		return null;
+        return jedis.smembers(urlSetKey(term));
 	}
 
     /**
@@ -78,8 +92,17 @@ public class JedisIndex {
 	 * @return Map from URL to count.
 	 */
 	public Map<String, Integer> getCounts(String term) {
-        // FILL THIS IN!
-		return null;
+		// First, set up the map of terms to their counts and
+		// retrieve the URLs associated with the given term.
+		Set<String> termURLs = getURLs(term);
+		Iterator<String> urlsIt = termURLs.iterator();
+		Map<String, Integer> termCounts = new HashMap<String, Integer>();
+		// Add all the URLs to the map.
+		while(urlsIt.hasNext()){
+			String url = urlsIt.next();
+			termCounts.put(url, getCount(url, term));
+		} 
+		return termCounts;
 	}
 
     /**
@@ -90,8 +113,16 @@ public class JedisIndex {
 	 * @return
 	 */
 	public Integer getCount(String url, String term) {
-        // FILL THIS IN!
-		return null;
+		// Attempts to retrieve an integer from the Jedis hash; returns a null count
+		// if this isn't possible (shouldn't happen but just in case...)
+        try
+    	{
+    	   	return Integer.parseInt(jedis.hget(termCounterKey(url),term));
+    	}
+    	catch (NumberFormatException e) 
+    	{
+    		return null;
+  		}
 	}
 
 
@@ -102,7 +133,16 @@ public class JedisIndex {
 	 * @param paragraphs  Collection of elements that should be indexed.
 	 */
 	public void indexPage(String url, Elements paragraphs) {
-        // FILL THIS IN!
+        TermCounter tc = new TermCounter(url);
+        // Count all words in elements first
+        tc.processElements(paragraphs);
+        // Add URL associated with each word to the term counter 
+        for (String word : tc.keySet())
+        {
+        	add(word, tc);
+        	// Send information over to Jedis to be stored in a hash
+        	jedis.hset(termCounterKey(url), word, Integer.toString(tc.get(word)));
+        }
 	}
 
 	/**
